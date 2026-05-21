@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Results: keep ONLY the report figures, ignore all raw experiment data
+results/*
+!results/figs/
+results/figs/*
+!results/figs/report/
+
+# Stale generated artifacts
+LGN_Nano_Report.pdf
+
+# Data cache
+data/
+
+# OS
+.DS_Store
+Thumbs.db
+*.lnk
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Diagnostic logs
+sg_*.log
