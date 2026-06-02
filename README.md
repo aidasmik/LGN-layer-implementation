@@ -138,6 +138,12 @@ Paliekant **attention L0 sluoksnyje** (jis apdoroja raw embedding'ą, kur cross-
 
 Hybrid uždaro **daugiau nei pusę** likusio gap'o (27→44, kelias iki 55). Tai ne pure LGN — bet aiškiai rodo, kur LGN "lubos" ir kur architektūrinė nuolaida turi prasmę.
 
+> **Pastaba (atnaujinta):** šis 44.4% yra iš ANKSTYVOJO classic-setup matavimo. Su
+> **pataisytu kodu** (griežtas honest-protokolas, žr. §8–§13) tikslesni skaičiai:
+> hybrid L0 + aggressive = **33.5%**, o geriausias pure-LGN (combo: hybrid-L0 +
+> token_shift K=2) = **36.5%**. Bendras pasakojimas tas pats (cross-token L0 sprendimas
+> uždaro gap'ą), tik tikslūs procentai žemesni dėl švaresnio matavimo.
+
 ## 7. Literatūros įžvalgos (2025 darbai)
 
 Naujausi DLGN tyrimai sutinka su mūsų pastebėjimais ir siūlo konkrečius sprendimus:
@@ -168,3 +174,106 @@ Aukščiau buvusi rekomendacija buvo „pradėti nuo Gumbel-STE". **Jį ištesta
 - **Vienintelis kelias pakelti lubas** — ne gate-lygmens triukai (depth, conv, IWP, Gumbel — visi žlugo arba fake), o **cross-token mechanizmai**: jau veikia token_shift (+9 pp) ir hybrid L0 (+6 pp); ilgalaikė kryptis — **stateful RDDLGN-stiliaus vartai** (dar neištestuota).
 
 > Pilnas rezultatų rinkinys ir metodologija: `LGN_IMPLEMENTATION_REPORT.md`.
+
+---
+
+# Antras etapas — pilnas eksperimentų rinkinys (fixed-code)
+
+> §1–§7 yra ankstyvojo etapo (classic-setup) žurnalas. Žemiau — pilnas, suderintas
+> 30+ konfigūracijų rinkinys su **pataisytu kodu** ir griežtu honest-protokolu
+> (užšaldyta bazė, identity-ablation kiekvienam). Pilna versija: `LGN_IMPLEMENTATION_REPORT.md`.
+
+## 8. Cross-token: token shift (pagrindinis proveržis)
+
+Pointwise LGN negali maišyti tokenų — visas gap'as koncentruotas L0 (hd ~+0.9…1.06).
+Sprendimas: **token_shift K** — kiekviena pozicija mato `[x[t], x[t-1], …, x[t-K]]`
+(channel-aligned, fiksuotas, jokių mokomų mixing parametrų → lieka honest LGN).
+
+| Config | Accuracy | vs aggressive |
+|---|---:|---:|
+| aggressive (be cross-token) | 27.22% | — |
+| token_shift K=1 | 35.16% | +7.9 pp |
+| **token_shift K=2** | **36.22%** | **+9.0 pp** |
+| token_shift K=3 | 36.13% | +8.9 pp |
+
+**K=2 — sweet spot.** Bandėm ir **dilated taps** (platesnis span tuo pačiu kanalų kiekiu):
+`[1,2,4]` davė 35.62% (truputį blogiau nei K=2), platesni span'ai nepadeda — contiguous K=2 jau optimalus.
+
+## 9. Selective LGN — efektyvumo/kokybės kreivė
+
+Paliekam kelis sluoksnius transformer'iu (boundary sluoksniai brangūs):
+
+| Transformer sluoksniai palikti | LGN sluoksnių | Accuracy |
+|---|---:|---:|
+| 0 (visi LGN) | 12 | 27.22% |
+| 1 (L0) | 11 | 34.70% |
+| 2 (L0, L11) | 10 | 37.03% |
+| **4 (L0,L1,L10,L11)** | 8 | **39.01%** |
+| 12 (visi transformer) | 0 | 54.87% |
+
+Pirmas paliktas sluoksnis (L0) duoda +7.5 pp; kiekvienas kitas mažiau. Sweet spot ~2–4.
+
+## 10. Dvifazis screening + fake-LGN atradimas
+
+Pilnas 12-sluoksnių scaling = ~3 h/config. Sukūrėm **pigų screening'ą**
+(`experiments/run_screen.py`): 4 reprezentatyvūs sluoksniai (L0,L5,L10,L11), 500 ft
+žingsnių, ~5 min/config. Screen'inam pirma, pilną scaling tik laimėtojams.
+
+**Svarbiausias metodologinis įrankis — identity ablation** (`--identity_logic`): LGN
+vidus tampa pass-through. `LGN_įnašas = hd(identity) − hd(real)`. Jei lygu — LGN
+dekoratyvus, o supantys sluoksniai daro darbą.
+
+Tai **demaskavo visus conv/linear variantus kaip FAKE LGN:**
+
+| Architektūra | LGN įnašas | Verdiktas |
+|---|---:|---|
+| aggressive | **+0.48** | ✅ REAL |
+| token_shift K=2 + CAGE | **+1.14** | ✅ REAL |
+| conv3 (Conv1d in/out proj) | **−0.69** | ❌ FAKE — conv kernel daro cross-token darbą, LGN tik triukšmas |
+| linear_proj | −0.24 | ❌ FAKE |
+
+`conv3` su LGN turėjo L0 hd 0.45, o `conv3` su identity LGN — **0.014**. T.y. conv
+išsprendžia L0 PATS; LGN tik kenkia. Conv pakartoja tą mokomą float transformaciją,
+kurią sąmoningai pašalinom aggressive setup'e.
+
+## 11. CAGE — Align Forward, Adapt Backward (2026)
+
+Hard forward (argmax = inference) + adaptyvi backward temperatūra pagal commitment.
+**Uždaro discretization gap'ą perpus, sąžiningai:**
+
+| Config | soft→hard gap | su CAGE |
+|---|---:|---:|
+| aggressive | +0.027 | **+0.014** (−48%) |
+| token_shift K=2 | +0.103 | **+0.047** (−54%) |
+
+Bet **accuracy nepasikeičia** (aggressive_cage 27.03% ≈ aggressive 27.22%) — mūsų
+baseline gap'as jau buvo mažas, tad nėra ko „gelbėti". Naudinga kaip honest-training
+garantija, ne accuracy boost'as. (Skirtingai nei image-LGN, kur gap'ai dideli ir CAGE duoda +20pp.)
+
+## 12. Ką dar bandėm ir NEpadėjo
+
+| Kryptis | Rezultatas | Kodėl |
+|---|---|---|
+| Depth + random interconnect | 25.3–26.3% (−1…−2 pp) | hard-snap klaidos kaupiasi per gylį |
+| Conv/Linear projekcijos | "geriausias" hd, bet **FAKE** | projekcija daro darbą (žr. §10) |
+| Gumbel-STE (Mind the Gap) | **blogiausias** (Σhd 2.10) | reikia hard forward, ne Gumbel triukšmo |
+| IWP (Light DLGN) | −5 pp (22.17%) | tinka image conv-LGN, ne byte-LM |
+| Binary regularization (RDDLGN) | flat/−0.1 | netinka mūsų thermometer encoder'iui |
+| Reverse greedy (sunkiausi pirma) | −1.15 pp | greedy easy-first leidžia tinklui palaipsniui prisitaikyti |
+| Hash embedding L0 | pašalinta (buggy) | train/eval forward mismatch — matavimas nevalidus |
+
+## 13. Galutinės lubos
+
+| | Accuracy | % nuo transformer |
+|---|---:|---:|
+| Transformer (ceiling) | 54.87% | 100% |
+| Geriausias su keliais transformer sluoksniais (sel_4edges) | **39.01%** | 71% |
+| Geriausias PURE LGN (combo: hybrid-L0 + token_shift K=2) | **36.45%** | 66% |
+| Honest floor (aggressive, jokio cross-token) | 27.22% | 50% |
+| Identity control (LGN = pass-through) | 23.25% | 42% |
+
+**Vienas dėsnis:** kiekvienas laimėjimas — iš **cross-token receptive field**
+(token_shift, hybrid, selective). *Niekas* iš gate-lygmens triukų (depth, conv, linear,
+IWP, Gumbel) nepakėlė lubų. Pointwise Boolean funkcija ant residual stream'o
+fundamentaliai negali atkurti to, ką attention daro L0 — tai ir yra pure-LGN riba.
+Prasmingas kelias toliau: **stateful / recurrent LGN vartai** (RDDLGN, dar neištestuota).
