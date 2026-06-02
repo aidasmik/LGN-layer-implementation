@@ -52,10 +52,31 @@ def _common_args(p):
 
     p.add_argument('--skip_gate',       action='store_true',
                    help='learnable scalar gating the LGN contribution (block can do less)')
+    p.add_argument('--learn_pool',      action='store_true',
+                   help='learnable per-channel affine on sum_pool output (cheap residual-stat matching)')
+    p.add_argument('--pool_weighted',   action='store_true',
+                   help='learnable per-bit weights in the group-sum (richer output aggregation)')
+    p.add_argument('--iwp',             action='store_true',
+                   help='Input-Wise Parametrization (Light DLGN 2025): 4-weight gate parametrization with residual init')
+    p.add_argument('--token_shift',     type=int, default=0,
+                   help='Fixed causal token shift K: each position sees [x[t-K]..x[t]] (cross-token via local context)')
+    p.add_argument('--shift_taps',      type=int, nargs='*', default=None,
+                   help='Dilated token shift (Idea E): explicit tap list, e.g. --shift_taps 1 2 4 8 16. Overrides --token_shift. Wide look-back span at low channel cost.')
+    # Stacked-depth + random interconnect (idea #4, reservoir-style).
+    p.add_argument('--random_from',     type=int, default=999,
+                   help='Sublayer index from which connections are FIXED random (gates still learnable). '
+                        '999 = all learnable; 1 = only 1st sublayer learns connections, rest are random (reservoir).')
+    # Conv1d projections (idea #2). Requires --no-no_in_proj / --no-sum_pool.
+    p.add_argument('--conv_in_k',       type=int, default=0,
+                   help='Kernel size for causal Conv1d in_proj (cross-token mixing). 0 = use Linear. Requires --no-no_in_proj.')
+    p.add_argument('--conv_out_k',      type=int, default=0,
+                   help='Kernel size for causal Conv1d out_proj. 0 = use Linear. Requires --no-sum_pool.')
     # training
     p.add_argument('--baseline_steps',  type=int,   default=5_000)
     p.add_argument('--imitation_steps', type=int,   default=1_000)
     p.add_argument('--finetune_steps',  type=int,   default=1_000)
+    p.add_argument('--eval_iters',      type=int,   default=30,
+                   help='val batches used in estimate_loss (lower = faster, noisier)')
     p.add_argument('--per_layer_anneal', action='store_true',
                    help='scale imitation steps by layer difficulty')
     p.add_argument('--ft_log_sharpness', action='store_true', default=True,
@@ -66,6 +87,34 @@ def _common_args(p):
                    help='imitation loss: mse (match activations) or kl (match output distribution)')
     p.add_argument('--ste',             action='store_true',
                    help='straight-through estimator during fine-tuning (forward=hard, backward=soft)')
+    p.add_argument('--gumbel_ste',      action='store_true',
+                   help='Gumbel-STE training (Mind the Gap 2025): stochastic discrete sample with soft gradient')
+    # CAGE — Align Forward Adapt Backward (arxiv 2603.14157, 2026)
+    p.add_argument('--cage',            action='store_true',
+                   help='CAGE: hard forward (argmax) + adaptive backward temperature based on commitment confidence. Closes the discretization gap by construction.')
+    p.add_argument('--cage_tau_max',    type=float, default=3.0,
+                   help='CAGE: max backward temperature (early training, exploratory). Default 3.0.')
+    p.add_argument('--cage_tau_min',    type=float, default=0.5,
+                   help='CAGE: min backward temperature (late training, sharp). Default 0.5.')
+    p.add_argument('--cage_ema',        type=float, default=0.99,
+                   help='CAGE: EMA decay for commitment confidence (higher = slower adaptation). Default 0.99.')
+    # RDDLGN binary regularization (arxiv 2508.06097, 2025)
+    p.add_argument('--bin_reg_weight',  type=float, default=0.0,
+                   help='Binary regularization (RDDLGN): adds λ·h(1-h) on post-sigmoid pre-binarization activations to encourage bit commitment. 0 = off.')
+    p.add_argument('--anneal_in_finetune', action='store_true',
+                   help='direct training: anneal temperature during fine-tune on LM loss instead of imitation')
+    p.add_argument('--ft_imit_weight',  type=float, default=0.0,
+                   help='curriculum: decaying MSE-to-MLP weight blended into fine-tune (0 = pure LM)')
+    p.add_argument('--layers',          type=int, nargs='*', default=None,
+                   help='restrict heatmap to these layer indices (default: all)')
+    p.add_argument('--seed',            type=int, default=1337,
+                   help='random seed (for variance / repeatability experiments)')
+    # NOTE: --freeze_unreplaced removed (was a no-op: the base is ALWAYS frozen by
+    # _make_logic_model / _add_logic_layer; only LGN layer params get requires_grad=True).
+    p.add_argument('--joint_polish_steps', type=int, default=0,
+                   help='scaling: final joint fine-tune of ALL LGN layers together (0 = off)')
+    p.add_argument('--joint_polish_kl_weight', type=float, default=0.0,
+                   help='joint polish: system-level KL distillation to original transformer logits (0 = LM only)')
     # misc
     p.add_argument('--results_dir',     type=str,   default='results')
     p.add_argument('--checkpoint',      type=str,   default=None)
@@ -101,15 +150,36 @@ def _build_cfg(args):
         cfg.logic.sum_pool   = args.sum_pool
         cfg.logic.n_bits     = args.n_bits
     cfg.logic.skip_gate       = args.skip_gate
+    cfg.logic.learn_pool      = args.learn_pool
+    cfg.logic.pool_weighted   = args.pool_weighted
+    cfg.logic.iwp             = args.iwp
+    cfg.logic.token_shift     = args.token_shift
+    cfg.logic.shift_taps      = args.shift_taps
+    cfg.logic.random_from     = args.random_from
+    cfg.logic.conv_in_k       = args.conv_in_k
+    cfg.logic.conv_out_k      = args.conv_out_k
     # training
     cfg.train.baseline_steps   = args.baseline_steps
     cfg.train.imitation_steps  = args.imitation_steps
     cfg.train.finetune_steps   = args.finetune_steps
+    cfg.train.eval_iters       = args.eval_iters
     cfg.train.per_layer_anneal = args.per_layer_anneal
     cfg.train.ft_log_sharpness = args.ft_log_sharpness
     cfg.train.ft_eval_hard     = args.ft_eval_hard
     cfg.train.imit_loss        = args.imit_loss
     cfg.train.ste              = args.ste
+    cfg.train.gumbel_ste       = args.gumbel_ste
+    cfg.train.cage             = args.cage
+    cfg.train.cage_tau_max     = args.cage_tau_max
+    cfg.train.cage_tau_min     = args.cage_tau_min
+    cfg.train.cage_ema         = args.cage_ema
+    cfg.train.bin_reg_weight   = args.bin_reg_weight
+    # bin_reg flag in logic config — switches on the buffer computation in forward
+    cfg.logic.bin_reg = (args.bin_reg_weight > 0.0)
+    cfg.train.anneal_in_finetune = args.anneal_in_finetune
+    cfg.train.ft_imit_weight   = args.ft_imit_weight
+    cfg.train.joint_polish_steps = args.joint_polish_steps
+    cfg.train.joint_polish_kl_weight = args.joint_polish_kl_weight
     cfg.results_dir = args.results_dir
     os.makedirs(cfg.results_dir, exist_ok=True)
     return cfg
@@ -127,26 +197,26 @@ def _load_or_train(cfg, model, data, args):
 
 def cmd_heatmap(args):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    torch.manual_seed(1337)
+    torch.manual_seed(args.seed)
     cfg = _build_cfg(args)
     data = WikiText2(cfg.data, device)
     model, gpt_cfg = make_gpt(cfg.model, cfg.data, device)
     print(f'Model: {cfg.model.n_layer}L x {cfg.model.n_embd}d  ({sum(p.numel() for p in model.parameters()):,} params)')
     _load_or_train(cfg, model, data, args)
     save_path = os.path.join(cfg.results_dir, 'heatmap.json')
-    run_heatmap(model, gpt_cfg, data, cfg, save_path=save_path)
+    run_heatmap(model, gpt_cfg, data, cfg, save_path=save_path, layers=args.layers)
     print(f'\nSaved -> {save_path}')
 
 
 def cmd_scale(args):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
-    torch.manual_seed(1337)
+    torch.manual_seed(args.seed)
     cfg = _build_cfg(args)
     data = WikiText2(cfg.data, device)
     model, gpt_cfg = make_gpt(cfg.model, cfg.data, device)
     _load_or_train(cfg, model, data, args)
     heatmap_results = None
-    if args.strategy == 'greedy':
+    if args.strategy in ('greedy', 'reverse_greedy'):
         with open(args.heatmap) as f:
             heatmap_results = json.load(f)
     save_path = os.path.join(cfg.results_dir, f'scale_{args.strategy}.json')
@@ -165,7 +235,9 @@ def main():
 
     p_s = sub.add_parser('scale')
     _common_args(p_s)
-    p_s.add_argument('--strategy',          type=str, default='greedy', choices=['greedy', 'uniform'])
+    p_s.add_argument('--strategy',          type=str, default='greedy',
+                     choices=['greedy', 'reverse_greedy', 'uniform'],
+                     help='greedy=easy-first, reverse_greedy=hard-first (L0 replaced when network still has full capacity).')
     p_s.add_argument('--heatmap',           type=str, default='results/heatmap.json')
     p_s.add_argument('--protected_layers',  type=int, nargs='*', default=[],
                      help='layer indices to never replace (e.g. --protected_layers 0 11)')
