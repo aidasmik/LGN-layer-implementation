@@ -142,18 +142,29 @@ Hybrid uždaro **daugiau nei pusę** likusio gap'o (27→44, kelias iki 55). Tai
 
 Naujausi DLGN tyrimai sutinka su mūsų pastebėjimais ir siūlo konkrečius sprendimus:
 
-- **["Mind the Gap"](https://arxiv.org/abs/2506.07500) (NeurIPS 2025)** — adresuoja būtent mūsų soft-hard gap problemą. Sprendimas: **Gumbel noise + STE** treniravimo metu. Rezultatai: 98% sumažintas discretization gap, 100% sumažintas neaktyvių vartų skaičius, 4.5× greitesnė konvergencija. **Tiesiogiai pritaikoma** mūsų pipeline'ui.
+- **["Mind the Gap"](https://arxiv.org/abs/2506.07500) (NeurIPS 2025)** — siūlo **Gumbel noise + STE** soft-hard gap'ui. Jų image rezultatai geri, BET **mes ištestavom mūsų byte-LM setup'e — žlugo** (blogiausias rezultatas, žr. 7.1). Įpėdinis CAGE (2026) parodė kodėl: svarbu hard forward, ne Gumbel triukšmas.
 
-- **["Light DLGN"](https://arxiv.org/abs/2510.03250) (2025)** — vartų **reparametrizacija**. Sumažina parametrus 4×, backward 1.86× greitesnis, 8.5× mažiau žingsnių. Daugiau apie efektyvumą nei kokybę, bet supaprastina training'ą.
+- **["Light DLGN"](https://arxiv.org/abs/2510.03250) (2025)** — vartų **reparametrizacija (IWP)**. 4× mažiau parametrų, greitesnis training. **Ištestuota → −5 pp** mūsų setup'e (tinka image conv-LGN, ne byte-LM).
 
 - **["Recurrent DDLGN"](https://arxiv.org/abs/2508.06097) (2025)** — *būtent* mūsų cross-token apribojimo sprendimas. Į loginį tinklą įdedami **stateful vartai (flip-flops, latches)**, kurie leidžia logikai dirbti su sekomis. WMT'14 vertimas: 5.0 BLEU (vs GRU 5.4), su **20,000× mažiau loginių operacijų**. Tai realus kelias atsisakyti attention'o **pačiame LGN** lygyje.
 
-### Konkretūs kiti žingsniai (informatyvūs literatūros)
+### 7.1 Ką iš šių krypčių JAU ištestavom (atnaujinta)
 
-1. **Gumbel-STE treniravimas** (Mind the Gap idėja) — pakeisti dabartinį hard/soft STE į Gumbel-noise versiją. Tikėtina nauda: mažesnis soft-hard gap, mažiau neaktyvių vartų, greitesnis treniravimas. **Pigus pataisymas, didelis potencialas.**
+Aukščiau buvusi rekomendacija buvo „pradėti nuo Gumbel-STE". **Jį ištestavom — ir jis pasirodė blogiausias.** Realūs rezultatai:
 
-2. **Stateful gates aggressive setup'e** (RDDLGN principas) — perdaryti LGN bloką taip, kad jis turėtų latent state'ą, perduodamą tarp tokenų. Tai leistų LGN dalinai pakeisti attention darbą be float matmuls. **Didelis architektūrinis pakeitimas, ilgalaikis tyrimas.**
+| Kryptis | Statusas | Rezultatas |
+|---|---|---|
+| **Gumbel-STE** (Mind the Gap) | ✅ ištestuota | **Blogiausia iš visų** — screening Σhd **2.096** vs aggressive 1.348 (+0.75 blogiau), L0 hd 0.90 → **1.47**. Mūsų byte-LM setup'e Gumbel noise gap'o NEUŽDARO. |
+| **CAGE** (Align Forward, Adapt Backward, 2026) | ✅ ištestuota | Mind the Gap *įpėdinis*. **Uždaro discretization gap'ą perpus, sąžiningai** (aggressive 0.027→0.014; tshift 0.103→0.047) — bet accuracy nepasikeičia (mūsų gap'as jau buvo mažas). Identity-ablation patvirtino: CAGE *padidina* tikrą LGN įnašą (+0.48 → +0.75 … +1.14 nat). |
+| **IWP** (Light DLGN) | ✅ ištestuota | **−5 pp** (22.17%) — tinka gilioms image conv-LGN, kenkia mūsų thermometer + sum-pool byte setup'ui. |
+| **Stateful / recurrent gates** (RDDLGN) | ❌ neištestuota | Vienintelė likusi tikrai perspektyvi kryptis grynam cross-token LGN. Reikalauja didelio architektūrinio pakeitimo. |
 
-3. **Light DLGN reparametrizacija** — perrašyti `LearnedLogicLayer` su nauja parametrizacija. Mažiau svarbu kokybei, bet padaro treniravimą greitesnį ir mažiau VRAM reikia.
+**Kodėl Gumbel-STE žlugo, o CAGE ne** (CAGE 2026 centrinė tezė, kurią mūsų duomenys patvirtino): gap'ą uždaro ne Gumbel triukšmas, o **hard forward kelias** (forward = argmax = inference). Gumbel-STE turi soft forward → gap lieka. CAGE: hard forward + adaptyvi backward temperatūra.
 
-**Mano rekomendacija:** pradėti nuo **#1 (Gumbel-STE)** — pigu, tiesiogiai pritaikoma, ir literatūra rodo aiškią naudą būtent discretization gap'o problemai, kurią mes pastebėjom.
+### 7.2 Atnaujinta rekomendacija
+
+- **NEdaryti Gumbel-STE** — empiriškai paneigta mūsų task'ui.
+- **CAGE** jau įgyvendinta (`--cage`) ir veikia kaip žadėta (gap −50%), bet accuracy nekelia, nes mūsų baseline gap'as jau mažas. Naudinga kaip *honest-training* garantija, ne kaip accuracy boost'as.
+- **Vienintelis kelias pakelti lubas** — ne gate-lygmens triukai (depth, conv, IWP, Gumbel — visi žlugo arba fake), o **cross-token mechanizmai**: jau veikia token_shift (+9 pp) ir hybrid L0 (+6 pp); ilgalaikė kryptis — **stateful RDDLGN-stiliaus vartai** (dar neištestuota).
+
+> Pilnas rezultatų rinkinys ir metodologija: `LGN_IMPLEMENTATION_REPORT.md`.
