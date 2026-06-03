@@ -53,7 +53,6 @@ ax.set_yticks(y); ax.set_yticklabels(labels, fontsize=9); ax.invert_yaxis()
 for i, v in enumerate(vals):
     ax.text(v + 0.3, i, f'{v:.1f}%', va='center', fontsize=8)
 ax.set_xlabel('Next-byte accuracy (%)')
-ax.set_title('All configurations since last report (frozen base, hard-snap)')
 ax.axvline(TF, color='#1976D2', ls=':', lw=1)
 plt.tight_layout(); plt.savefig(f'{OUT}/A_full_ranking.png', dpi=150, bbox_inches='tight'); plt.close()
 print('A done')
