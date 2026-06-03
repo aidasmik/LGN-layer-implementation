@@ -132,25 +132,25 @@ Visi pataisymai **per noise floor** (±0.5 ppt). Daugiau loginių vartų net pab
 
 ## 6. Hybrid L0 — architektūrinis apėjimas
 
-Paliekant **attention L0 sluoksnyje** (jis apdoroja raw embedding'ą, kur cross-token mixing kritinis), accuracy šokteli dramatiškai:
+Paliekant **attention L0 sluoksnyje** (jis apdoroja raw embedding'ą, kur cross-token mixing kritinis), accuracy pakyla aiškiai:
 
 ![final comparison](results/figs/report/18_final_comparison.png)
 
 | Modelis | accuracy |
 |---|---:|
 | Aggressive LGN (visi 12) | 27.2% |
-| **Hybrid L0 + aggressive LGN** | **44.4%** |
+| **Hybrid L0 + aggressive LGN** | **33.5%** |
+| **Combo (hybrid L0 + token-shift K=2)** | **36.5%** |
 | Transformer (ceiling) | 54.9% |
 
-**+17 punktų vien iš vieno architektūrinio sprendimo.** Tai parodo, kad gap iki transformer'io koncentruotas **L0** sluoksnyje, kur LGN fundamentaliai negali atlikti reikiamo darbo (pointwise vartai negali maišyti tokenų — tai attention darbas).
+**+6.2 pp vien iš vieno architektūrinio sprendimo** (hybrid L0), o pridėjus token-shift — **+9.2 pp** (combo). Tai parodo, kad gap iki transformer'io koncentruotas **L0** sluoksnyje, kur LGN fundamentaliai negali atlikti reikiamo darbo (pointwise vartai negali maišyti tokenų — tai attention darbas).
 
-Hybrid uždaro **daugiau nei pusę** likusio gap'o (27→44, kelias iki 55). Tai ne pure LGN — bet aiškiai rodo, kur LGN "lubos" ir kur architektūrinė nuolaida turi prasmę.
-
-> **Pastaba (atnaujinta):** šis 44.4% yra iš ANKSTYVOJO classic-setup matavimo. Su
-> **pataisytu kodu** (griežtas honest-protokolas, žr. §8–§13) tikslesni skaičiai:
-> hybrid L0 + aggressive = **33.5%**, o geriausias pure-LGN (combo: hybrid-L0 +
-> token_shift K=2) = **36.5%**. Bendras pasakojimas tas pats (cross-token L0 sprendimas
-> uždaro gap'ą), tik tikslūs procentai žemesni dėl švaresnio matavimo.
+> **Pastaba dėl skaičių:** ankstesnėje šio skyriaus versijoje buvo **44.4%** — bet tai buvo
+> iš classic-setup hibrido (LGN apsuptas mokomų **Linear** sluoksnių + dalinai treniruotas
+> attention dėl bug'o). Identity-ablation testas vėliau parodė, kad tuos „papildomus" punktus
+> uždirbo Linear sluoksniai, **ne logikos vartai** (fake-LGN efektas). Su pataisytu kodu —
+> tikrai aggressive LGN MLP + tikrai užšaldytas attention + sąžiningas matavimas — honest
+> skaičius yra **33.5%**. Grafikas ir lentelė atnaujinti į fixed-code reikšmes.
 
 ## 7. Literatūros įžvalgos (2025 darbai)
 
