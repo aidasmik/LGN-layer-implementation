@@ -174,6 +174,48 @@ Lower Σ = better. `aggressive` Σ = 1.348 is the reference.
 The Conv1d kernel solves L0 *by itself*; the LGN only adds noise. Conv/linear re-introduce
 the trained float transformation we deliberately removed → they are not honest LGN.
 
+### 6.2 Channel-conv projections (the original "idea #2") — honest LGN, but no ceiling gain
+
+The conv above was a **temporal** Conv1d (kernel over time, full channels) — and it was
+fake. The originally-proposed idea #2 was different: **channel-dimension** convs with a
+hard bottleneck — expand `Conv1d(in=4, out=64)`, compress `Conv1d(in=32, out=1, stride 8..32)`.
+We implemented it exactly and probed it (single-layer, identity/frozen ablation):
+
+| layer | stride | REAL soft_d | FROZEN soft_d | LGN_contrib | verdict |
+|---:|---:|---:|---:|---:|---|
+| L0 | 8 | 0.221 | 2.171 | **+1.95** | **REAL** |
+| L0 | 16 | 0.202 | 2.071 | **+1.87** | **REAL** |
+
+Unlike temporal-conv, the **32→1 compression bottleneck is too weak to do the task alone**,
+so the LGN body must do real work — the *strongest* LGN contribution we measured (+1.9),
+and L0 single-layer soft cost dropped to ~0.20 (vs aggressive ~0.85). This looked very
+promising — it suggested the L0 wall might finally be broken.
+
+**Full 12-layer cumulative scaling (stride=8, W=32,768 gates/layer = 32× aggressive),
+hard-snap** — made memory-feasible on an 8 GB GPU via **gradient checkpointing** (recompute
+each wide block in backward instead of storing all 12):
+
+| Config | hard acc | soft acc | gates/layer | vs aggressive |
+|---|---:|---:|---:|---:|
+| **conv_proj s8 (idea #2)** | **27.30 %** | 27.91 % | 32,768 | **+0.08 pp** |
+| aggressive | 27.22 % | — | 1,024 | — |
+| combo (cross-token) | 36.45 % | — | 36,864 | +9.2 |
+
+**Result: no improvement.** Despite 32× more gates, added float convs, and an honest
+(REAL) LGN, conv_proj lands at **27.30 % ≈ aggressive 27.22 %**.
+
+**Why the promising probe misled us (a methodology lesson):**
+- The probe measured **single-layer SOFT** degradation; the table measures **12-layer
+  cumulative HARD** accuracy. Per-layer soft cost does **not** predict cumulative hard accuracy.
+- The 32→1 bottleneck is honest but is itself an information bottleneck → caps capacity at ~aggressive.
+- The soft→hard gap was small (27.91 → 27.30), so discretization is not the cause.
+- Decisively: **channel-conv is per-token** — it adds no cross-token mixing, so the **L0
+  wall remains**. An honest, expensive, per-token LGN still cannot beat the cross-token ceiling.
+
+This is the central finding confirmed from a new angle: **only cross-token mechanisms raise
+the ceiling.** A per-token trick can be made honest (channel bottleneck) or fake (temporal
+conv), but neither raises accuracy beyond the aggressive floor.
+
 ---
 
 ## 7. What works vs what doesn't
@@ -189,7 +231,8 @@ the trained float transformation we deliberately removed → they are not honest
 ### Does not work
 | Technique | Result | Why |
 |---|---|---|
-| Conv / Linear projections | "best" hd but **FAKE** | projection does the work, LGN decorative |
+| Temporal Conv / Linear projections | "best" hd but **FAKE** | projection does the work, LGN decorative (§6.1) |
+| Channel-conv projections (idea #2) | 27.30 % ≈ aggressive | honest LGN, but per-token → no cross-token gain (§6.2) |
 | Depth + random interconnect | −1 … −2 pp | hard-snap error accumulates across Boolean layers |
 | Gumbel-STE (Mind the Gap) | **worst** (Σhd 2.10) | gap needs hard forward, not Gumbel noise |
 | IWP (Light DLGN) | −5 pp | image conv-LGN technique, hurts byte-LM |
