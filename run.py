@@ -150,7 +150,24 @@ def _load_or_train(cfg, model, data, args):
     ckpt = args.checkpoint or os.path.join(cfg.results_dir, 'baseline.pt')
     if os.path.exists(ckpt):
         print(f'Loading baseline from {ckpt}')
-        model.load_state_dict(torch.load(ckpt, map_location=next(model.parameters()).device))
+        device = next(model.parameters()).device
+        try:
+            state = torch.load(ckpt, map_location=device, weights_only=True)
+        except TypeError:
+            state = torch.load(ckpt, map_location=device)  # older torch without weights_only
+        # Validate architecture compatibility BEFORE load_state_dict, so a mismatch
+        # (changed n_layer / n_embd / block_size) fails early with a clear message.
+        want = model.state_dict()
+        bad = [k for k in want if k in state and tuple(state[k].shape) != tuple(want[k].shape)]
+        missing = [k for k in want if k not in state]
+        if bad or missing:
+            raise RuntimeError(
+                f"Checkpoint '{ckpt}' is incompatible with the current model config "
+                f"(n_layer={cfg.model.n_layer}, n_embd={cfg.model.n_embd}, "
+                f"block_size={cfg.data.block_size}).\n"
+                f"  {len(bad)} shape-mismatched tensors (e.g. {bad[:3]})\n"
+                f"  {len(missing)} missing keys (e.g. {missing[:3]})")
+        model.load_state_dict(state)
     else:
         train_baseline(model, data, cfg.train)
         torch.save(model.state_dict(), os.path.join(cfg.results_dir, 'baseline.pt'))

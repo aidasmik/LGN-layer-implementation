@@ -17,16 +17,23 @@ from lgn import (
 # Dataset
 # ---------------------------------------------------------------------------
 
-def _ensure_datasets():
+def _require_datasets():
+    """Import HuggingFace `datasets`. Set LGN_AUTO_PIP=1 to allow auto-install
+    (off by default — keeps CI/reproducibility deterministic, no surprise network/pip)."""
     try:
         import datasets  # noqa: F401
-    except ImportError:
-        subprocess.run([sys.executable, '-m', 'pip', 'install', 'datasets'], check=True)
+    except ImportError as e:
+        if os.environ.get('LGN_AUTO_PIP') == '1':
+            subprocess.run([sys.executable, '-m', 'pip', 'install', 'datasets'], check=True)
+        else:
+            raise ImportError(
+                "The 'datasets' package is required. Install it with `pip install datasets` "
+                "(or set LGN_AUTO_PIP=1 to auto-install).") from e
 
 
 class WikiText2:
     def __init__(self, data_cfg, device='cuda'):
-        _ensure_datasets()
+        _require_datasets()
         from datasets import load_dataset
         self.block_size = data_cfg.block_size
         self.device = device
@@ -35,6 +42,12 @@ class WikiText2:
         self.train = self._encode(wt['train'],      data_cfg.train_chars, device)
         self.val   = self._encode(wt['validation'], data_cfg.val_chars,   device)
         print(f'  train: {len(self.train):,}  val: {len(self.val):,} bytes')
+        # Early validation: a too-small split breaks torch.randint(len - block - 1).
+        for name, t in (('train', self.train), ('val', self.val)):
+            if len(t) <= self.block_size + 1:
+                raise ValueError(
+                    f"{name} split ({len(t)} bytes) must exceed block_size+1 "
+                    f"({self.block_size + 1}); increase {name}_chars or lower block_size.")
 
     @staticmethod
     def _encode(rows, max_chars, device):
@@ -50,12 +63,26 @@ class WikiText2:
         text = ''.join(pieces)[:max_chars]
         return torch.tensor(list(text.encode('utf-8', errors='ignore')), dtype=torch.long, device=device)
 
-    def get_batch(self, split='train', batch_size=32):
+    def get_batch(self, split='train', batch_size=32, generator=None):
         src = self.train if split == 'train' else self.val
-        ix = torch.randint(len(src) - self.block_size - 1, (batch_size,), device=self.device)
+        ix = torch.randint(len(src) - self.block_size - 1, (batch_size,),
+                           device=self.device, generator=generator)
         x = torch.stack([src[i:i + self.block_size]         for i in ix])
         y = torch.stack([src[i + 1:i + 1 + self.block_size] for i in ix])
         return x, y
+
+    def fixed_val_batches(self, eval_iters=30, batch_size=32):
+        """A FIXED set of validation batches (deterministic), cached per
+        (eval_iters, batch_size). Ensures baseline / soft / hard models are all
+        evaluated on the SAME val slices, so degradation and accuracy are comparable."""
+        if eval_iters < 1 or batch_size < 1:
+            raise ValueError(f"eval_iters and batch_size must be >= 1 (got {eval_iters}, {batch_size})")
+        key = (eval_iters, batch_size)
+        cache = self.__dict__.setdefault('_val_cache', {})
+        if key not in cache:
+            g = torch.Generator(device=self.device); g.manual_seed(1234)
+            cache[key] = [self.get_batch('val', batch_size, generator=g) for _ in range(eval_iters)]
+        return cache[key]
 
 # ---------------------------------------------------------------------------
 # Core training helpers
@@ -63,25 +90,26 @@ class WikiText2:
 
 @torch.no_grad()
 def estimate_loss(model, data, eval_iters=30, batch_size=32):
+    """Mean val loss on the FIXED val batches (identical across model variants)."""
     model.eval()
-    losses = [float(model(*data.get_batch('val', batch_size))[1]) for _ in range(eval_iters)]
+    batches = data.fixed_val_batches(eval_iters, batch_size)
+    losses = [float(model(xb, yb)[1]) for xb, yb in batches]
     return sum(losses) / len(losses)
 
 
 @torch.no_grad()
 def estimate_metrics(model, data, eval_iters=30, batch_size=32):
-    """Loss (nats), perplexity, and next-token top-1 accuracy on the val set."""
+    """Loss (nats), perplexity, and next-token top-1 accuracy on the FIXED val batches."""
     import math
     model.eval()
     tot_loss, correct, total = 0.0, 0, 0
-    for _ in range(eval_iters):
-        xb, yb = data.get_batch('val', batch_size)
+    for xb, yb in data.fixed_val_batches(eval_iters, batch_size):
         logits, loss = model(xb, yb)
         tot_loss += float(loss)
         pred = logits.argmax(dim=-1)
         correct += int((pred == yb).sum())
         total   += yb.numel()
-    avg_loss = tot_loss / eval_iters
+    avg_loss = tot_loss / len(data.fixed_val_batches(eval_iters, batch_size))
     return {
         'loss':       round(avg_loss, 5),
         'perplexity': round(math.exp(avg_loss), 4),

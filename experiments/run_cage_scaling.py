@@ -9,6 +9,9 @@ import os
 import subprocess
 import sys
 
+# Run from the repo root regardless of invocation directory.
+os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 CK = 'results/baseline.pt'
 HM = 'results/aggressive/heatmap.json'
 OUT_BASE = 'results/report'

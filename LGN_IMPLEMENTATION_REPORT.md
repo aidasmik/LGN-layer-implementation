@@ -1,5 +1,13 @@
 # LGN as a Transformer Replacement — Implementation Report
 
+> ⚠️ **CLI note (historical doc):** this report describes the *full* experimental history.
+> The codebase was later slimmed to only the accuracy-raising techniques. **Flags such as
+> `--iwp`, `--gumbel_ste`, `--shift_taps`, `--conv_in_k/--conv_out_k`, `--skip_gate`,
+> `--pool_weighted`, `--edge_depth`, `--random_from` and the `reverse_greedy` strategy no
+> longer exist.** The current CLI supports: aggressive setup (`--binary_io --n_bits
+> --no_in_proj --sum_pool --learn_pool`), `--token_shift`, `--hybrid_layers`,
+> `--protected_layers`, `--cage`, `--identity_logic`. See `LGN_FULL_REPORT.md` §14.
+
 **Project:** LGN_Nano — replacing transformer sublayers with Differentiable Logic Gate
 Networks (LGN) in a byte-level autoregressive language model (nanoGPT, WikiText-2).
 

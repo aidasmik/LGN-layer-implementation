@@ -5,6 +5,13 @@ Tikrinu, kiek nanoGPT transformer'io MLP sluoksnių galima pakeisti į Boolean *
 **Modelis:** nanoGPT, 12 sluoksnių × 128d × 4 head'ai, byte-level WikiText-2.
 **LGN blokas:** 16-vartų Bool polinomas `c₀ + c₁·A + c₂·B + c₃·A·B` su soft → hard snap ir temperatūros annealing'u.
 
+> ⚠️ **CLI pastaba:** §1–§13 aprašo VISĄ eksperimentų istoriją (įsk. technikas, kurios nepadėjo).
+> Kodas vėliau sutrumpintas iki tik accuracy keliančių technikų — tekste minimi
+> `pool_weighted`, `iwp`, `gumbel_ste`, `shift_taps`, `conv_*`, `skip_gate`, `edge_depth`,
+> `depth>1` ir `reverse_greedy` **nebeegzistuoja kode**. Dabartinis CLI: aggressive setup,
+> `--token_shift`, `--hybrid_layers`, `--protected_layers`, `--cage`, `--identity_logic`.
+> Pilnas einamasis aprašas: `LGN_FULL_REPORT.md`.
+
 ---
 
 Pradėjau nuo iš anksto pasiūlytų krypčių: aktyvacijos funkcijos, dropout, init scale, per-layer annealing, gilesni kraštiniai sluoksniai. Čia daug nesiplėsiu, nes po identity ablation testo šie rezultatai tapo nelabai aktualūs.

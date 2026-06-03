@@ -9,6 +9,10 @@ import os
 import matplotlib.pyplot as plt
 from matplotlib.patches import Patch
 
+# Model depth under test. Change here if you scale to a different number of layers
+# (e.g. 16) so the per-layer bar charts span the right range.
+N_LAYER = 12
+
 plt.rcParams.update({
     'font.size': 10, 'axes.titlesize': 11, 'axes.labelsize': 10,
     'axes.grid': True, 'grid.alpha': 0.25,
@@ -81,11 +85,11 @@ def fig1_per_layer():
     hd = hd_layer(p)
     fig, ax = plt.subplots(figsize=(9, 4.5))
     colors = [C_LGN if v < 0.1 else (C_HYB if v < 0.5 else C_CMB) for v in hd]
-    ax.bar(range(12), hd, color=colors, edgecolor='black', linewidth=0.5)
+    ax.bar(range(N_LAYER), hd, color=colors, edgecolor='black', linewidth=0.5)
     for i, v in enumerate(hd):
         ax.text(i, v + 0.02, f'{v:+.2f}', ha='center', va='bottom', fontsize=9)
-    ax.set_xticks(range(12))
-    ax.set_xticklabels([f'L{i}' for i in range(12)])
+    ax.set_xticks(range(N_LAYER))
+    ax.set_xticklabels([f'L{i}' for i in range(N_LAYER)])
     ax.set_xlabel('Replaced layer index')
     ax.set_ylabel('hard_degradation (nat)')
     ax.set_title('Per-layer difficulty: replacing ONE layer at a time (aggressive setup)')
@@ -121,7 +125,7 @@ def fig2_scaling():
         plotted = True
     if not plotted: return
     ax.axhline(0, color='black', linewidth=0.6)
-    ax.set_xticks(range(13))
+    ax.set_xticks(range(N_LAYER + 1))
     ax.set_xlabel('Number of layers replaced')
     ax.set_ylabel('hard_degradation (nat)')
     ax.set_title('Cumulative scaling: degradation as layers are progressively replaced')
@@ -180,13 +184,13 @@ def fig4_utilization():
     THRESH = 0.02
     fig, ax = plt.subplots(figsize=(10, 4.5))
     colors = [C_LGN if c > THRESH else C_IDN for c in contrib]
-    ax.bar(range(12), contrib, color=colors, edgecolor='black', linewidth=0.5)
+    ax.bar(range(N_LAYER), contrib, color=colors, edgecolor='black', linewidth=0.5)
     ax.axhline(THRESH, color='black', linewidth=0.6, linestyle='--', alpha=0.5)
     for i, c in enumerate(contrib):
         ax.text(i, c + 0.003, f'{c:+.3f}', ha='center', va='bottom',
                 fontsize=9, fontweight='bold')
-    ax.set_xticks(range(12))
-    ax.set_xticklabels([f'L{i}' for i in range(12)])
+    ax.set_xticks(range(N_LAYER))
+    ax.set_xticklabels([f'L{i}' for i in range(N_LAYER)])
     ax.set_xlabel('Layer')
     ax.set_ylabel('LGN contribution (nat)')
     ax.set_title('Where does the LGN actually do work? (identity ablation per layer)')
@@ -305,7 +309,7 @@ def fig7_selective():
         (1,  metric('results/sel_L0/metrics.json')['lgn_hard'] if os.path.exists('results/sel_L0/metrics.json') else None, 'sel_L0'),
         (2,  metric('results/sel_edges/metrics.json')['lgn_hard'] if os.path.exists('results/sel_edges/metrics.json') else None, 'sel_edges'),
         (4,  metric('results/sel_4edges/metrics.json')['lgn_hard'] if os.path.exists('results/sel_4edges/metrics.json') else None, 'sel_4edges'),
-        (12, tf, 'Transformer'),
+        (N_LAYER, tf, 'Transformer'),
     ]
     pts = [(x, m['accuracy']*100, lbl) for x, m, lbl in pairs if m is not None]
     if len(pts) < 2: return
@@ -318,7 +322,7 @@ def fig7_selective():
     ax.set_xlabel('Number of transformer layers KEPT (out of 12)')
     ax.set_ylabel('Accuracy (%)')
     ax.set_title('Selective LGN: efficiency–quality curve')
-    ax.set_xticks([0, 1, 2, 4, 12])
+    ax.set_xticks([0, 1, 2, 4, N_LAYER])
     ax.set_ylim(20, 62)
     plt.tight_layout()
     plt.savefig(f'{OUT}/07_selective_curve.png', dpi=150, bbox_inches='tight')
@@ -334,8 +338,8 @@ def fig8_L0_diagnosis():
     if not os.path.exists(p): return
     hd = hd_layer(p)
     fig, ax = plt.subplots(figsize=(9, 4.5))
-    colors = [C_CMB if i == 0 else (C_HYB if i == 11 else C_LGN) for i in range(12)]
-    ax.bar(range(12), hd, color=colors, edgecolor='black', linewidth=0.5)
+    colors = [C_CMB if i == 0 else (C_HYB if i == N_LAYER - 1 else C_LGN) for i in range(N_LAYER)]
+    ax.bar(range(N_LAYER), hd, color=colors, edgecolor='black', linewidth=0.5)
     for i, v in enumerate(hd):
         ax.text(i, v + 0.02, f'{v:+.2f}', ha='center', va='bottom', fontsize=9)
     # Annotation arrow to L0
@@ -349,8 +353,8 @@ def fig8_L0_diagnosis():
                 arrowprops=dict(arrowstyle='->', color=C_HYB, lw=1.5),
                 fontsize=9, color=C_HYB,
                 bbox=dict(boxstyle='round,pad=0.3', facecolor='white', edgecolor=C_HYB))
-    ax.set_xticks(range(12))
-    ax.set_xticklabels([f'L{i}' for i in range(12)])
+    ax.set_xticks(range(N_LAYER))
+    ax.set_xticklabels([f'L{i}' for i in range(N_LAYER)])
     ax.set_xlabel('Layer')
     ax.set_ylabel('hard_degradation (nat)')
     ax.set_title('Why are L0 and L11 hard? — boundary layers carry the nonlinearity load')

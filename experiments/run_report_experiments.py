@@ -15,6 +15,10 @@ import os
 import subprocess
 import sys
 
+# Run from the repo root regardless of where this script is invoked from
+# (paths below + the `run.py` subprocess are relative to the repo root).
+os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 CK = 'results/baseline.pt'
 HM = 'results/aggressive/heatmap.json'
 OUT_BASE = 'results/report'

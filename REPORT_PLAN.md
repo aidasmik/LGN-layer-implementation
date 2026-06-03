@@ -1,5 +1,12 @@
 # LGN ataskaitos planas
 
+> ⚠️ **CLI pastaba (istorinis dokumentas):** kodas vėliau sutrumpintas iki tik accuracy
+> keliančių technikų. Flag'ai `--pool_weighted`, `--iwp`, `--gumbel_ste`, `--shift_taps`,
+> `--conv_in_k/--conv_out_k`, `--skip_gate`, `--edge_depth`, `--random_from` ir
+> `reverse_greedy` strategija **nebeegzistuoja**. Dabartinis CLI: aggressive
+> (`--binary_io --n_bits --no_in_proj --sum_pool --learn_pool`), `--token_shift`,
+> `--hybrid_layers`, `--protected_layers`, `--cage`, `--identity_logic`. Žr. `LGN_FULL_REPORT.md` §14.
+
 > Pilnas dokumentas, kuris atspindi LGN implementaciją, treniravimo pipeline'ą, eksperimentų rezultatus ir literatūros sąsajas. Šis failas — planas su skyrių struktūra, pagrindiniais skaičiais ir trūkstamų testų sąrašu.
 
 ---
