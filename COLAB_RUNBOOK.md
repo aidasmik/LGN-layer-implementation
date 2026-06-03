@@ -53,11 +53,11 @@ drive.mount("/content/drive")
 ## 3. Run Integrity Tests
 
 ```python
-%cd /content/Project_Logic
+%cd /content/Project_Logic/LGN_Nano
 !python -m pytest tests/test_lgn_integrity.py -q
 ```
 
-Expected result after the 2026-05-24 fixes:
+Expected result:
 
 ```text
 ......                                                                   [100%]
@@ -69,29 +69,12 @@ These tests check:
 - thermometer STE has unit total gradient;
 - hybrid attention and `ln_1` are frozen;
 - hybrid frozen sublayers stay in eval mode after `.train()`;
-- `gumbel_ste` is reset after fine-tune;
+- the `ste` toggle is reset after fine-tune;
 - token shift layout is channel-aligned and soft/hard paths match;
 - scaling imitation can use live-prefix inputs with teacher target layer;
 - aggressive `width_mult` no-op behavior is explicitly documented by test.
 
-## 4. Optional: Run OpenEvolve Smoke Evaluator
-
-```python
-%cd /content/Project_Logic
-!python openevolve_lgn_transformer/evaluator.py openevolve_lgn_transformer/initial_program.py
-```
-
-Expected shape of output:
-
-```text
-"correctness": 1.0
-"hard_ok": 1.0
-"shape_ok": 1.0
-```
-
-Exact score can drift slightly across Torch/CUDA versions.
-
-## 5. Optional: Run A Small LGN_Nano Experiment
+## 4. Optional: Run A Small LGN_Nano Experiment
 
 If you have a baseline checkpoint in Drive, use it. This avoids retraining the
 baseline every Colab session.
@@ -127,7 +110,7 @@ Scaling run:
   --results_dir /content/drive/MyDrive/lgn_colab_results/scale_full
 ```
 
-## 6. Quick Local-vs-Colab Benchmark Cell
+## 5. Quick Local-vs-Colab Benchmark Cell
 
 Use this on both machines to get an apples-ish runtime snapshot:
 

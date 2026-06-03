@@ -1,8 +1,12 @@
 # Experiment log
 
 All runs use the same baseline: 12-layer nanoGPT, n_embd=128, n_head=4, trained on
-WikiText-2 byte-level. Baseline validation loss ≈ 1.522–1.537 (varies ±0.01 across
-eval runs due to random batches).
+WikiText-2 byte-level. Baseline validation loss ≈ 1.52. Evaluation uses a FIXED, cached
+set of validation batches (`WikiText2.fixed_val_batches`), so baseline / soft / hard runs
+are compared on identical slices (no per-run RNG variation).
+
+> Note: this is a historical log. Some flags below were removed in the slim codebase
+> (`--edge_depth`, `--edge_width_mult`, `--gumbel_ste`, `--iwp`, ...). See README CLI banner.
 
 Key metric: **hard_degradation** = `hard_val − baseline_val`. Negative = improvement,
 positive = worse than baseline. Reported for layers 0, 5 (representative middle),

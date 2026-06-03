@@ -162,7 +162,7 @@ def fig3_accuracy():
                 ha='center', fontweight='bold')
     ax.axhline(0.4, color='red', linewidth=0.7, linestyle=':', label='Random byte (0.4%)')
     ax.set_ylabel('Next-byte accuracy (%)')
-    ax.set_title('Final accuracy: 12 layers replaced (frozen base, fixed code)')
+    ax.set_title(f'Final accuracy: {N_LAYER} layers replaced (frozen base, fixed code)')
     ax.legend()
     plt.xticks(rotation=10, ha='right')
     plt.tight_layout()
@@ -226,7 +226,7 @@ def fig5_efficiency():
         axes[0].text(b.get_x() + b.get_width()/2, v * 1.02, f'{v/1e6:.2f}M',
                      ha='center', fontweight='bold', fontsize=9)
     axes[0].set_ylabel('Trainable parameters')
-    axes[0].set_title('Model size (12 blocks)')
+    axes[0].set_title(f'Model size ({N_LAYER} blocks)')
     axes[0].set_yscale('log')
 
     # Subplot 2: FLOPs per token
@@ -235,7 +235,7 @@ def fig5_efficiency():
     for b, v in zip(bars, vals):
         axes[1].text(b.get_x() + b.get_width()/2, v * 1.02, f'{v/1e6:.1f}M',
                      ha='center', fontweight='bold', fontsize=9)
-    axes[1].set_ylabel('FLOPs per token (12 blocks)')
+    axes[1].set_ylabel(f'FLOPs per token ({N_LAYER} blocks)')
     axes[1].set_title('Floating-point compute')
     axes[1].set_yscale('log')
 
@@ -319,7 +319,7 @@ def fig7_selective():
     for x, y, lbl in pts:
         ax.annotate(f'{lbl}\n{y:.1f}%', xy=(x, y), xytext=(0, 10),
                     textcoords='offset points', ha='center', fontsize=9)
-    ax.set_xlabel('Number of transformer layers KEPT (out of 12)')
+    ax.set_xlabel(f'Number of transformer layers KEPT (out of {N_LAYER})')
     ax.set_ylabel('Accuracy (%)')
     ax.set_title('Selective LGN: efficiency–quality curve')
     ax.set_xticks([0, 1, 2, 4, N_LAYER])

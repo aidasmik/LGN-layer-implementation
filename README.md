@@ -8,7 +8,8 @@ Tikrinu, kiek nanoGPT transformer'io MLP sluoksnių galima pakeisti į Boolean *
 > ⚠️ **CLI pastaba:** §1–§13 aprašo VISĄ eksperimentų istoriją (įsk. technikas, kurios nepadėjo).
 > Kodas vėliau sutrumpintas iki tik accuracy keliančių technikų — tekste minimi
 > `pool_weighted`, `iwp`, `gumbel_ste`, `shift_taps`, `conv_*`, `skip_gate`, `edge_depth`,
-> `depth>1` ir `reverse_greedy` **nebeegzistuoja kode**. Dabartinis CLI: aggressive setup,
+> `random_from` (random interconnect) ir `reverse_greedy` **nebeegzistuoja kode**.
+> Dabartinis CLI: aggressive setup, `--depth` (numatytas 1; >1 vis dar veikia, bet nepadeda),
 > `--token_shift`, `--hybrid_layers`, `--protected_layers`, `--cage`, `--identity_logic`.
 > Pilnas einamasis aprašas: `LGN_FULL_REPORT.md`.
 
