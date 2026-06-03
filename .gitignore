@@ -17,11 +17,10 @@ env/
 # Jupyter
 .ipynb_checkpoints/
 
-# Results: keep ONLY the report figures, ignore all raw experiment data
+# Results: keep ONLY the figures, ignore all raw experiment data
 results/*
 !results/figs/
-results/figs/*
-!results/figs/report/
+!results/figs/**
 
 # Stale generated artifacts
 LGN_Nano_Report.pdf

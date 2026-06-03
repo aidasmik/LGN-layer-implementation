@@ -150,26 +150,4 @@ Tikrasis pranašumas realizuojamas **FPGA/ASIC**, kur kiekvienas 2-input vartas 
 
 Turiu dar keletą krypčių, bet labiausiai perspektyvi (RDDLGN stateful vartai) reikalauja
 gano didelio visos architektūros pertvarkymo. Dabartinės implementacijos jau ženkliai
-padidina efektyvumą FPGA/ASIC kontekste. Pagrindinis klausimas — kuria kryptimi judėti
-toliau.
-
----
-
-## Repo struktūra
-
-| Failas | Paskirtis |
-|---|---|
-| `lgn.py` | LGN klasės (aggressive core, token-shift, hybrid, CAGE) + hard-snap variantai |
-| `pipeline.py` | imitacija, fine-tune, cumulative scaling, CAGE schedule |
-| `run.py` | CLI (`heatmap` / `scale`) |
-| `efficiency.py` | params / FLOPs / gates / memory + GPU benchmark |
-| `experiments/` | scaling batch'ai + grafikų generavimas |
-| `tests/` | integrity testai |
-| `results/figs/` | grafikai |
-
-```bash
-# per-layer difficulty
-python run.py heatmap --learn_pool --checkpoint results/baseline.pt --results_dir results/aggressive
-# pagrindinis scaling batch
-python experiments/run_report_experiments.py
-```
+padidina efektyvumą FPGA/ASIC kontekste.
