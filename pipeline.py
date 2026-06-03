@@ -151,8 +151,6 @@ def imitate_layer(logic_model, layer_idx, trained_model, data, cfg, step_mult=1.
     imitation target is still computed by the ORIGINAL layer on that live input."""
     logic_layer = logic_model.transformer.h[layer_idx]
     logic_layer.set_temperature(cfg.temp_start)
-    if getattr(cfg, 'gumbel_ste', False):
-        logic_layer.use_gumbel = True
     trainable = [p for p in logic_layer.parameters() if p.requires_grad]
     opt = torch.optim.AdamW(trainable, lr=cfg.imitation_lr)
     total_steps = max(1, int(cfg.imitation_steps * step_mult))
@@ -247,14 +245,6 @@ def finetune_layers(logic_model, target_indices, data, cfg, trained_model=None, 
         cage_K = 16  # gate logits dimension (worst case; conn=4 also fits in [1/16, 1])
         c_ema = 1.0 / cage_K  # initial confidence = uniform
         print(f'    [CAGE enabled] tau_max={tau_max} tau_min={tau_min} ema={ema_decay}')
-    # Enable Gumbel-STE (Mind the Gap 2025): stochastic discrete training, reduces soft-hard gap
-    if getattr(cfg, 'gumbel_ste', False):
-        for idx in target_indices:
-            logic_model.transformer.h[idx].use_gumbel = True
-        print('    [Gumbel-STE enabled] stochastic discrete sample + soft gradient')
-    bin_reg_w = float(getattr(cfg, 'bin_reg_weight', 0.0))
-    if bin_reg_w > 0:
-        print(f'    [bin_reg enabled] weight={bin_reg_w}')
     logic_model.train()
     for step in range(cfg.finetune_steps):
         if anneal:
@@ -277,10 +267,6 @@ def finetune_layers(logic_model, target_indices, data, cfg, trained_model=None, 
         ent = sum(logic_model.transformer.h[idx].entropy_loss(cfg.ft_ent_conn, cfg.ft_ent_gate)
                   for idx in target_indices)
         loss = lm_loss + ent
-        # Binary regularization (RDDLGN 2025): pushes pre-binarization sigmoid output to {0,1}.
-        if bin_reg_w > 0:
-            bin_terms = [logic_model.transformer.h[idx].bin_reg_loss() for idx in target_indices]
-            loss = loss + bin_reg_w * sum(bin_terms)
         # Curriculum: decaying MSE-to-MLP guidance (single-layer fine-tune only).
         # input_model=logic_model so the curriculum sees the LIVE upstream distribution
         # (mirrors the imitation fix; otherwise the target is anchored to the wrong inputs).
@@ -297,11 +283,7 @@ def finetune_layers(logic_model, target_indices, data, cfg, trained_model=None, 
             if cfg.ft_log_sharpness:
                 for idx in target_indices:
                     s = logic_model.transformer.h[idx].sharpness()
-                    layer = logic_model.transformer.h[idx]
-                    extra = ''
-                    if getattr(layer, 'skip_gate', False):
-                        extra = f'  skip_alpha={float(layer.skip_alpha):.4f}'
-                    print(f'      L{idx}: gate={s["gate"]:.3f}  conn_a={s["conn_a"]:.3f}  conn_b={s["conn_b"]:.3f}{extra}')
+                    print(f'      L{idx}: gate={s["gate"]:.3f}  conn_a={s["conn_a"]:.3f}  conn_b={s["conn_b"]:.3f}')
             if cfg.ft_eval_hard:
                 hard = make_hard_model(logic_model, target_indices, device)
                 hard_val = estimate_loss(hard, data, cfg.eval_iters, cfg.batch_size)
@@ -314,9 +296,6 @@ def finetune_layers(logic_model, target_indices, data, cfg, trained_model=None, 
     if use_cage:
         for idx in target_indices:
             logic_model.transformer.h[idx].set_backward_temp(None)
-    if getattr(cfg, 'gumbel_ste', False):
-        for idx in target_indices:
-            logic_model.transformer.h[idx].use_gumbel = False
 
 
 def make_hard_model(soft_model, target_indices, device):
@@ -335,78 +314,27 @@ def make_hard_model(soft_model, target_indices, device):
 # Experiment: per-layer heatmap
 # ---------------------------------------------------------------------------
 
-def _is_edge(layer_idx, n_layer):
-    return layer_idx == 0 or layer_idx == n_layer - 1
-
-
-def _layer_geometry(layer_idx, n_layer, logic_cfg):
-    """Return (depth, width_mult) for this layer index, honoring edge overrides."""
-    if _is_edge(layer_idx, n_layer):
-        depth = logic_cfg.edge_depth if logic_cfg.edge_depth > 0 else logic_cfg.depth
-        wmult = logic_cfg.edge_width_mult if logic_cfg.edge_width_mult > 0 else logic_cfg.width_mult
-    else:
-        depth = logic_cfg.depth
-        wmult = logic_cfg.width_mult
-    return depth, wmult
+def _build_logic_layer(trained_default, layer_idx, gpt_cfg, logic_cfg):
+    """Construct a LogicGateGPTLayer (or hybrid) for layer_idx with the kept flags."""
+    common = dict(
+        logic_width=gpt_cfg.n_embd * logic_cfg.width_mult, depth=logic_cfg.depth, k=logic_cfg.k,
+        activation=logic_cfg.activation,
+        conn_init_scale=logic_cfg.conn_init_scale, gate_init_scale=logic_cfg.gate_init_scale,
+        identity_logic=logic_cfg.identity_logic,
+        binary_io=logic_cfg.binary_io, n_bits=logic_cfg.n_bits,
+        sum_pool=logic_cfg.sum_pool, no_in_proj=logic_cfg.no_in_proj,
+        learn_pool=logic_cfg.learn_pool, token_shift=logic_cfg.token_shift,
+    )
+    if layer_idx in logic_cfg.hybrid_layers:
+        print(f'  [hybrid] keeping original attention sublayer for L{layer_idx}, logic replaces MLP only')
+        return HybridLogicGateGPTLayer(
+            gpt_cfg, layer_idx, trained_default.transformer.h[layer_idx], **common)
+    return LogicGateGPTLayer(gpt_cfg, layer_idx, **common)
 
 
 def _make_logic_model(trained_default, layer_idx, gpt_cfg, logic_cfg, device):
     model = copy.deepcopy(trained_default)
-    depth, wmult = _layer_geometry(layer_idx, gpt_cfg.n_layer, logic_cfg)
-    if _is_edge(layer_idx, gpt_cfg.n_layer) and (logic_cfg.edge_depth > 0 or logic_cfg.edge_width_mult > 0):
-        print(f'  [edge layer override] depth={depth}, width_mult={wmult}')
-    if layer_idx in logic_cfg.hybrid_layers:
-        print(f'  [hybrid] keeping original attention sublayer for L{layer_idx}, logic replaces MLP only')
-        # Hybrid layer now propagates ALL aggressive flags: the MLP path is identical to
-        # LogicGateGPTLayer (binary_io, no_in_proj, sum_pool, learn_pool, pool_weighted,
-        # token_shift, iwp, skip_gate). Only the attention sublayer is frozen.
-        logic_layer = HybridLogicGateGPTLayer(
-            gpt_cfg, layer_idx, trained_default.transformer.h[layer_idx],
-            logic_width=gpt_cfg.n_embd * wmult,
-            depth=depth, k=logic_cfg.k,
-            activation=logic_cfg.activation,
-            conn_init_scale=logic_cfg.conn_init_scale,
-            gate_init_scale=logic_cfg.gate_init_scale,
-            identity_logic=logic_cfg.identity_logic,
-            binary_io=logic_cfg.binary_io,
-            n_bits=logic_cfg.n_bits,
-            sum_pool=logic_cfg.sum_pool,
-            no_in_proj=logic_cfg.no_in_proj,
-            skip_gate=logic_cfg.skip_gate,
-            learn_pool=logic_cfg.learn_pool,
-            pool_weighted=logic_cfg.pool_weighted,
-            iwp=logic_cfg.iwp,
-            token_shift=logic_cfg.token_shift,
-            random_from=getattr(logic_cfg, 'random_from', 999),
-            conv_in_k=getattr(logic_cfg,  'conv_in_k',  0),
-            conv_out_k=getattr(logic_cfg, 'conv_out_k', 0),
-            bin_reg=getattr(logic_cfg,    'bin_reg',    False),
-            shift_taps=getattr(logic_cfg, 'shift_taps', None),
-        ).to(device)
-    else:
-        logic_layer = LogicGateGPTLayer(
-            gpt_cfg, layer_idx,
-            logic_width=gpt_cfg.n_embd * wmult,
-            depth=depth, k=logic_cfg.k,
-            activation=logic_cfg.activation,
-            conn_init_scale=logic_cfg.conn_init_scale,
-            gate_init_scale=logic_cfg.gate_init_scale,
-            identity_logic=logic_cfg.identity_logic,
-            binary_io=logic_cfg.binary_io,
-            n_bits=logic_cfg.n_bits,
-            sum_pool=logic_cfg.sum_pool,
-            no_in_proj=logic_cfg.no_in_proj,
-            skip_gate=logic_cfg.skip_gate,
-            learn_pool=logic_cfg.learn_pool,
-            pool_weighted=logic_cfg.pool_weighted,
-            iwp=logic_cfg.iwp,
-            token_shift=logic_cfg.token_shift,
-            random_from=getattr(logic_cfg, 'random_from', 999),
-            conv_in_k=getattr(logic_cfg,  'conv_in_k',  0),
-            conv_out_k=getattr(logic_cfg, 'conv_out_k', 0),
-            bin_reg=getattr(logic_cfg,    'bin_reg',    False),
-            shift_taps=getattr(logic_cfg, 'shift_taps', None),
-        ).to(device)
+    logic_layer = _build_logic_layer(trained_default, layer_idx, gpt_cfg, logic_cfg).to(device)
     model.replace_layer(layer_idx, logic_layer)
     for p in model.parameters(): p.requires_grad = False
     _enable_lgn_grads(model.transformer.h[layer_idx])
@@ -499,60 +427,9 @@ def _logic_indices(model):
 
 
 def _add_logic_layer(model, layer_idx, gpt_cfg, logic_cfg, device, trained_default=None):
-    depth, wmult = _layer_geometry(layer_idx, gpt_cfg.n_layer, logic_cfg)
-    if _is_edge(layer_idx, gpt_cfg.n_layer) and (logic_cfg.edge_depth > 0 or logic_cfg.edge_width_mult > 0):
-        print(f'  [edge layer override] depth={depth}, width_mult={wmult}')
-    if layer_idx in logic_cfg.hybrid_layers:
-        if trained_default is None:
-            raise ValueError("hybrid layer requires trained_default to copy attention from")
-        print(f'  [hybrid] keeping original attention sublayer for L{layer_idx}, logic replaces MLP only')
-        new_layer = HybridLogicGateGPTLayer(
-            gpt_cfg, layer_idx, trained_default.transformer.h[layer_idx],
-            logic_width=gpt_cfg.n_embd * wmult,
-            depth=depth, k=logic_cfg.k,
-            activation=logic_cfg.activation,
-            conn_init_scale=logic_cfg.conn_init_scale,
-            gate_init_scale=logic_cfg.gate_init_scale,
-            identity_logic=logic_cfg.identity_logic,
-            binary_io=logic_cfg.binary_io,
-            n_bits=logic_cfg.n_bits,
-            sum_pool=logic_cfg.sum_pool,
-            no_in_proj=logic_cfg.no_in_proj,
-            skip_gate=logic_cfg.skip_gate,
-            learn_pool=logic_cfg.learn_pool,
-            pool_weighted=logic_cfg.pool_weighted,
-            iwp=logic_cfg.iwp,
-            token_shift=logic_cfg.token_shift,
-            random_from=getattr(logic_cfg, 'random_from', 999),
-            conv_in_k=getattr(logic_cfg,  'conv_in_k',  0),
-            conv_out_k=getattr(logic_cfg, 'conv_out_k', 0),
-            bin_reg=getattr(logic_cfg,    'bin_reg',    False),
-            shift_taps=getattr(logic_cfg, 'shift_taps', None),
-        ).to(device)
-    else:
-        new_layer = LogicGateGPTLayer(
-            gpt_cfg, layer_idx,
-            logic_width=gpt_cfg.n_embd * wmult,
-            depth=depth, k=logic_cfg.k,
-            activation=logic_cfg.activation,
-            conn_init_scale=logic_cfg.conn_init_scale,
-            gate_init_scale=logic_cfg.gate_init_scale,
-            identity_logic=logic_cfg.identity_logic,
-            binary_io=logic_cfg.binary_io,
-            n_bits=logic_cfg.n_bits,
-            sum_pool=logic_cfg.sum_pool,
-            no_in_proj=logic_cfg.no_in_proj,
-            skip_gate=logic_cfg.skip_gate,
-            learn_pool=logic_cfg.learn_pool,
-            pool_weighted=logic_cfg.pool_weighted,
-            iwp=logic_cfg.iwp,
-            token_shift=logic_cfg.token_shift,
-            random_from=getattr(logic_cfg, 'random_from', 999),
-            conv_in_k=getattr(logic_cfg,  'conv_in_k',  0),
-            conv_out_k=getattr(logic_cfg, 'conv_out_k', 0),
-            bin_reg=getattr(logic_cfg,    'bin_reg',    False),
-            shift_taps=getattr(logic_cfg, 'shift_taps', None),
-        ).to(device)
+    if layer_idx in logic_cfg.hybrid_layers and trained_default is None:
+        raise ValueError("hybrid layer requires trained_default to copy attention from")
+    new_layer = _build_logic_layer(trained_default, layer_idx, gpt_cfg, logic_cfg).to(device)
     model.replace_layer(layer_idx, new_layer)
     for p in model.parameters(): p.requires_grad = False
     for idx in _logic_indices(model):
@@ -613,12 +490,6 @@ def run_scaling(trained_default, gpt_cfg, data, exp_cfg,
         if heatmap_results is None:
             raise ValueError("strategy='greedy' requires heatmap_results")
         layer_order = [r['layer_idx'] for r in sorted(heatmap_results, key=lambda r: r['hard_degradation'])
-                       if r['layer_idx'] not in protected]
-    elif strategy == 'reverse_greedy':
-        if heatmap_results is None:
-            raise ValueError("strategy='reverse_greedy' requires heatmap_results")
-        # Hardest layer first: lets the still-transformer downstream compensate while LGN learns L0.
-        layer_order = [r['layer_idx'] for r in sorted(heatmap_results, key=lambda r: -r['hard_degradation'])
                        if r['layer_idx'] not in protected]
     else:
         layer_order = [i for i in range(0, n, max(1, n // 8)) if i not in protected]

@@ -78,9 +78,6 @@ CONFIGS = [
     # n_bits sweep — input granularity (~1h)
     ('aggressive_n4',     'scale',   ['--n_bits', '4']),
     ('aggressive_n16',    'scale',   ['--n_bits', '16']),
-
-    # IWP with fixed init (Light DLGN 2025) — fair re-test with all fixes (~30 min)
-    ('iwp_fixed',         'scale',   ['--iwp']),
 ]
 
 

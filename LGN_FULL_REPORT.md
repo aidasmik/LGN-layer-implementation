@@ -371,15 +371,23 @@ because they *add* a (fixed or attention-based) cross-token channel.
 
 ## 14. Code map & reproduction
 
+> **Note on the codebase:** after these experiments the code was deliberately slimmed to
+> **only the techniques that raise accuracy** — the aggressive setup, token-shift, hybrid
+> layers, selective LGN (`--protected_layers`), CAGE, plus the `--identity_logic` honesty
+> ablation. The implementations of the techniques that *failed or were fake* (depth +
+> random interconnect, conv/channel-conv projections, IWP, Gumbel-STE, binary
+> regularization, dilated taps, reverse-greedy, skip-gate, pool-weighted) were **removed**.
+> Their results above stand as the record; the report is the reproduction of those
+> negative findings, not the code.
+
 | Path | Purpose |
 |---|---|
-| `lgn.py` | LGN classes + all techniques + hard-snap mirrors + efficiency helpers |
+| `lgn.py` | LGN classes (aggressive core, token-shift, hybrid, CAGE) + hard-snap mirrors |
 | `pipeline.py` | imitation, fine-tune, cumulative scaling, joint polish, CAGE schedule |
 | `run.py` | CLI (`heatmap` / `scale`) |
 | `efficiency.py` | params / FLOPs(per-token) / gates / memory + GPU benchmark |
-| `experiments/run_report_experiments.py` | main 18-config scaling batch |
-| `experiments/run_screen*.py` | two-phase screening + identity / CAGE / dilated ablations |
-| `experiments/run_cage_scaling.py`, `run_depth_conv_experiments.py`, `run_phase_E_H.py`, `run_reverse_greedy.py` | targeted scaling batches |
+| `experiments/run_report_experiments.py` | main scaling batch (aggressive / token-shift / hybrid / selective / n_bits) |
+| `experiments/run_cage_scaling.py` | CAGE scaling (aggressive_cage, tshift2_cage) |
 | `experiments/plot_report_final.py` | figure generation |
 | `tests/test_lgn_integrity.py` | 6 integrity tests (all pass) |
 

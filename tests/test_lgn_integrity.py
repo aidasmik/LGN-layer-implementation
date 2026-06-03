@@ -82,7 +82,7 @@ class TinyTokenData:
         return x, y
 
 
-def test_finetune_resets_gumbel_toggle():
+def test_finetune_resets_ste_toggle():
     torch.manual_seed(1)
     model_cfg = ModelConfig(n_layer=2, n_head=2, n_embd=16, dropout=0.0)
     data_cfg = DataConfig(block_size=8, vocab_size=64)
@@ -95,12 +95,12 @@ def test_finetune_resets_gumbel_toggle():
     train_cfg = TrainConfig()
     train_cfg.batch_size = 2
     train_cfg.finetune_steps = 1
-    train_cfg.gumbel_ste = True
+    train_cfg.ste = True
     train_cfg.ft_log_sharpness = False
 
     finetune_layers(logic_model, [0], TinyTokenData(), train_cfg)
 
-    assert layer.use_gumbel is False
+    assert layer.use_ste is False
 
 
 def test_token_shift_is_channel_aligned_and_soft_hard_match():

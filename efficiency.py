@@ -76,8 +76,8 @@ def block_flops(block, block_size=64, n_embd=128):
         if block.sum_pool:
             # sum_pool: just additions, negligible vs above
             flops += block.logic[0].out_dim  # ~bit_width adds
-            if block.learn_pool or block.pool_weighted:
-                flops += block.C * (block.group_size if hasattr(block, 'group_size') else 1)
+            if block.learn_pool:
+                flops += block.C  # per-channel affine
         else:
             # out_proj: bit_width -> C
             flops += block.logic[0].out_dim * C
