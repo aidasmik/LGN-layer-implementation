@@ -18,8 +18,7 @@ from lgn import (
 # ---------------------------------------------------------------------------
 
 def _require_datasets():
-    """Import HuggingFace `datasets`. Set LGN_AUTO_PIP=1 to allow auto-install
-    (off by default — keeps CI/reproducibility deterministic, no surprise network/pip)."""
+
     try:
         import datasets  # noqa: F401
     except ImportError as e:
@@ -72,9 +71,7 @@ class WikiText2:
         return x, y
 
     def fixed_val_batches(self, eval_iters=30, batch_size=32):
-        """A FIXED set of validation batches (deterministic), cached per
-        (eval_iters, batch_size). Ensures baseline / soft / hard models are all
-        evaluated on the SAME val slices, so degradation and accuracy are comparable."""
+
         if eval_iters < 1 or batch_size < 1:
             raise ValueError(f"eval_iters and batch_size must be >= 1 (got {eval_iters}, {batch_size})")
         key = (eval_iters, batch_size)
@@ -131,15 +128,7 @@ def train_baseline(model, data, cfg):
 
 @torch.no_grad()
 def get_layer_io(trained_model, layer_idx, data, batch_size=32, input_model=None):
-    """Return (layer_in, layer_tgt) for imitation.
 
-    - layer_in: input distribution seen at layer_idx — uses `input_model` if given,
-      else `trained_model`. In cumulative scaling, pass live_model so the new LGN
-      layer trains against the ACTUAL upstream distribution (which differs from the
-      original transformer's after prior layers have been replaced).
-    - layer_tgt: original transformer's response at that layer, on the SAME input.
-      This is what we want the LGN to approximate.
-    """
     src = input_model if input_model is not None else trained_model
     device = next(trained_model.parameters()).device
     # Snapshot per-module training flags and restore them afterwards. Without this,
@@ -171,12 +160,7 @@ def get_layer_io(trained_model, layer_idx, data, batch_size=32, input_model=None
 
 def imitate_layer(logic_model, layer_idx, trained_model, data, cfg, step_mult=1.0,
                   input_model=None):
-    """Train one LGN layer to imitate the corresponding transformer MLP.
 
-    input_model: if provided (cumulative scaling), the upstream forward uses LIVE
-    state (with prior LGN layers in place) so the new layer sees the ACTUAL input
-    distribution it will face, not the original transformer's distribution. The
-    imitation target is still computed by the ORIGINAL layer on that live input."""
     logic_layer = logic_model.transformer.h[layer_idx]
     logic_layer.set_temperature(cfg.temp_start)
     trainable = [p for p in logic_layer.parameters() if p.requires_grad]
@@ -223,13 +207,7 @@ def imitate_layer(logic_model, layer_idx, trained_model, data, cfg, step_mult=1.
 
 
 def _trainable_params(model, target_indices, cfg):
-    """Collect trainable params for the optimizer.
 
-    NOTE: the base model is already globally frozen by _make_logic_model /
-    _add_logic_layer (which set requires_grad=False on everything, then
-    re-enable only the LGN layers via _enable_lgn_grads). So this just returns
-    whatever currently has requires_grad=True. The historical 'freeze_unreplaced'
-    flag was a no-op (the base is ALWAYS frozen by design) and has been removed."""
     return [p for p in model.parameters() if p.requires_grad]
 
 
@@ -434,13 +412,7 @@ def run_heatmap(trained_default, gpt_cfg, data, exp_cfg, save_path=None, layers=
 # ---------------------------------------------------------------------------
 
 def _enable_lgn_grads(layer):
-    """Enable gradients on a logic layer's trainable params.
 
-    BUG FIX: HybridLogicGateGPTLayer.__init__ freezes attn/ln_1 (copied from trained
-    baseline), but the surrounding pipeline used to re-enable ALL params via
-    `for p in layer.parameters(): p.requires_grad = True`. That silently re-trained
-    the attention sublayer, defeating the "keep original attention" intent.
-    Now: skip attn.* and ln_1.* names for hybrid layers; standard layers unchanged."""
     is_hybrid = isinstance(layer, HybridLogicGateGPTLayer)
     for name, p in layer.named_parameters():
         if is_hybrid and (name.startswith('attn.') or name.startswith('ln_1.')):
@@ -465,9 +437,7 @@ def _add_logic_layer(model, layer_idx, gpt_cfg, logic_cfg, device, trained_defau
 
 
 def joint_polish(live_model, target_indices, data, cfg, trained_model=None):
-    """Coordinate all LGN layers together after sequential scaling: a final joint
-    fine-tune of every LGN layer (all kept sharp at temp_end) on the LM loss, with
-    an optional system-level KL term to the original transformer's logits."""
+
     steps = getattr(cfg, 'joint_polish_steps', 0)
     kl_w  = getattr(cfg, 'joint_polish_kl_weight', 0.0)
     if steps <= 0:
@@ -554,13 +524,10 @@ def run_scaling(trained_default, gpt_cfg, data, exp_cfg,
 
         if exp_cfg.train.imitation_steps > 0:
             print(f'  [Imitation layer {new_layer_idx}]')
-            # Pass live_model so imitation uses the ACTUAL upstream distribution (with
-            # prior LGN replacements), not the original transformer's distribution.
             imitate_layer(live_model, new_layer_idx, trained_default, data, exp_cfg.train,
                           step_mult=step_mult, input_model=live_model)
         else:
-            # Direct LM training: no imitation warm-start. Start the new layer soft so
-            # fine-tune annealing can shape it from scratch (matches run_heatmap behaviour).
+
             print(f'  [Imitation skipped: imitation_steps=0 -> direct training] layer {new_layer_idx}')
             live_model.transformer.h[new_layer_idx].set_temperature(exp_cfg.train.temp_start)
 
@@ -589,7 +556,6 @@ def run_scaling(trained_default, gpt_cfg, data, exp_cfg,
             os.makedirs(os.path.dirname(os.path.abspath(save_path)), exist_ok=True)
             with open(save_path, 'w') as f: json.dump(results, f, indent=2)
 
-    # Optional final joint coordination of all LGN layers together.
     if getattr(exp_cfg.train, 'joint_polish_steps', 0) > 0:
         current = _logic_indices(live_model)
         print(f'\n{"="*55}\nJOINT POLISH (all {len(current)} LGN layers)\n{"="*55}')
