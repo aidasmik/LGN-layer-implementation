@@ -25,18 +25,16 @@ class LogicConfig:
     conn_init_scale: float = 0.02
     gate_init_scale: float = 0.02
     hybrid_layers: list = field(default_factory=list)  # layers that keep frozen attention
-    identity_logic: bool = False                        # ablation: LGN body = pass-through
+    identity_logic: bool = False                        # ablation: LGN body
 
-    # AGGRESSIVE SETUP (the honest default — no trained float transform around the gates)
+    # AGGRESSIVE SETUP
     binary_io: bool = True
     n_bits: int = 8
     sum_pool: bool = True
     no_in_proj: bool = True
     # Learnable per-channel affine on the sum_pool output (cheap residual-stat matching).
     learn_pool: bool = False
-    # Fixed causal token shift: each position sees [x[t-K]..x[t]] — a local cross-token
-    # receptive field for the pointwise LGN. K=0 disables. (The single mechanism, with
-    # hybrid/selective, that actually raises accuracy.)
+
     token_shift: int = 0
 
 @dataclass
@@ -56,34 +54,18 @@ class TrainConfig:
     finetune_lr: float = 2e-3
     ft_ent_conn: float = 0.0005
     ft_ent_gate: float = 0.01
-    per_layer_anneal: bool = False  # scale imitation steps by layer difficulty
-    ft_log_sharpness: bool = True   # print per-layer sharpness
-    ft_eval_hard: bool = False      # evaluate hard-snapped model
+    per_layer_anneal: bool = False 
+    ft_log_sharpness: bool = True  
+    ft_eval_hard: bool = False      
     imit_loss: str = 'mse'
-    ste: bool = False               # straight-through estimator (forward hard, backward soft)
-    # CAGE — Align Forward Adapt Backward (2026, arxiv 2603.14157).
-    # Implies STE (hard forward) and adapts the BACKWARD-pass softmax temperature τ_b
-    # based on an EMA of average commitment confidence. Closes the discretization gap
-    # by construction (forward = inference). Schedule: τ_b in [tau_min, tau_max] linearly
-    # interpolated by EMA confidence c_ema (1/K-1.0 -> tau_max-tau_min).
+    ste: bool = False              
     cage: bool = False
     cage_tau_max: float = 3.0
     cage_tau_min: float = 0.5
     cage_ema:     float = 0.99
-    # Direct (from-scratch) training: anneal temperature DURING fine-tune on LM loss
-    # instead of during imitation. Lets the LGN learn its own solution, not imitate MLP.
     anneal_in_finetune: bool = False
-    # Curriculum: decaying MSE-to-MLP term blended into fine-tune (weight*1.0 -> 0).
-    # 0 = pure LM loss. Single-layer fine-tune only (heatmap).
     ft_imit_weight: float = 0.0
-    # NOTE: 'freeze_unreplaced' was removed — the base model is ALWAYS frozen by
-    # _make_logic_model / _add_logic_layer (only LGN layer params get requires_grad=True),
-    # so the flag was redundant. All degradation numbers are already 'pure LGN' measurements.
-    # Joint polish: after sequential scaling, fine-tune ALL LGN layers together to
-    # coordinate them (fixes greedy myopia). 0 = disabled.
-    joint_polish_steps: int = 0
-    # System-level distillation during joint polish: KL of student logits to the
-    # original transformer's logits. Global coordination signal (vs per-layer MLP). 0 = LM only.
+    joint_polish_steps: int = 0.
     joint_polish_kl_weight: float = 0.0
 
 @dataclass
@@ -226,8 +208,7 @@ def _thermometer_ste(h, n_bits, training):
     expanded = h.unsqueeze(-1).expand(*prefix, D, n_bits)
     hard = (expanded > levels).to(dtype=h.dtype)
     if training:
-        # Identity STE: backward grad = d(out_total)/dh = 1. Each of n_bits outputs
-        # contributes h/n_bits in the soft path, so summed gradient w.r.t. h = 1.
+
         soft = expanded / n_bits
         out = soft + (hard - soft).detach()
     else:
@@ -246,9 +227,7 @@ class LearnedLogicLayer(nn.Module):
         self.out_dim = out_dim
         self.k = k
         self.temperature = float(temperature)
-        # CAGE (Align Forward Adapt Backward, 2026): independent backward-pass temperature.
-        # None = use self.temperature for backward (vanilla STE). When set, softmax(logits/τ_b)
-        # is used in the STE backward path while forward stays hard argmax.
+
         self.backward_temp = None
         self.identity = identity
         g = torch.Generator()
